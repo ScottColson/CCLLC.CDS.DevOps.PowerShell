@@ -15,24 +15,16 @@ namespace CCLLC.Cds.DevOps.PowerShell.Cmdlets
     {
         private static Dictionary<string, int> _typeCodes = new Dictionary<string, int>();
 
-        [Parameter(Position = 0, Mandatory = false)]
+        [Parameter(Position = 0, Mandatory = true)]
         public IOrganizationService Conn { get; set; }
 
         [Parameter(Position = 1, Mandatory = true)]
         public string TemplateDirectory { get; set; }
 
-        [Parameter(Position = 1, Mandatory = false)]
-        public string ConnectionString { get; set; }
+        
 
         protected override void ProcessRecord()
         {
-            if (Conn is null)
-            {
-                _ = ConnectionString ?? throw new System.Exception("Connection string is required if Conn is not supplied.");
-
-                Conn = new Microsoft.Xrm.Tooling.Connector.CrmServiceClient(ConnectionString);
-            }
-
             var existingTemplates = LoadExistingTemplatesFromDynamics(Conn);
 
             WriteVerbose($"Found {existingTemplates.Count} existing templates in target environment.");
