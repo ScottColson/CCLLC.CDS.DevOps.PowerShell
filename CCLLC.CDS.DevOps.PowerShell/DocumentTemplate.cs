@@ -19,15 +19,16 @@ namespace CCLLC.Cds.DevOps.PowerShell
         public byte[] FileContents { get; private set; }
         public string EntityTypeName { get; private set; }
         public int ObjectTypeCode { get; private set; }
-        
+        public string path;
+
         public DocumentTemplate(string filePath)
         {
-            LoadFile(filePath);            
+            LoadFile(filePath);
         }
 
         public DocumentTemplate(Entity record)
         {
-            if(record.LogicalName != Constants.EntityLogicalName)
+            if (record.LogicalName != Constants.EntityLogicalName)
             {
                 throw new Exception("Incorrect record type.");
             }
@@ -35,11 +36,11 @@ namespace CCLLC.Cds.DevOps.PowerShell
             Id = record.Id;
             DocumentType = (DocumentTypes)record.GetAttributeValue<OptionSetValue>(Constants.Fields.DocumentType)?.Value;
             EntityTypeName = record.GetAttributeValue<string>(Constants.Fields.AssociatedEntityTypeCode);
-                      
+
             Name = record.GetAttributeValue<string>(Constants.Fields.Name);
             FileContents = Convert.FromBase64String(record.GetAttributeValue<string>(Constants.Fields.Content));
 
-            if(DocumentType == DocumentTypes.MicrosoftWord 
+            if (DocumentType == DocumentTypes.MicrosoftWord
                 && FileContents != null)
             {
                 var entityIdentifiers = ExtractEntityTypeAndCodeFromDocument();
@@ -66,6 +67,7 @@ namespace CCLLC.Cds.DevOps.PowerShell
             Name = Path.GetFileNameWithoutExtension(filePath);
 
             FileContents = File.ReadAllBytes(filePath);
+            path = filePath;
 
             if (DocumentType == DocumentTypes.MicrosoftWord
                 && FileContents != null)
@@ -91,7 +93,7 @@ namespace CCLLC.Cds.DevOps.PowerShell
                 stream.Close();
             }
         }
-               
+
         public Entity ToEntity()
         {
             var entity = new Entity("documenttemplate");
@@ -118,36 +120,60 @@ namespace CCLLC.Cds.DevOps.PowerShell
                 return;
             }
 
+            var document = WordprocessingDocument.Open(path, true);
+
+            var mainPart = document.MainDocumentPart;
+
+            var headerParts = mainPart?
+                .Parts
+                .Where(p => p.OpenXmlPart is HeaderPart)
+                .Select(p => p.OpenXmlPart);
+
+            var footerParts = mainPart?
+                .Parts
+                .Where(p => p.OpenXmlPart is FooterPart)
+                .Select(p => p.OpenXmlPart);
+
+            var customXmlPropertyParts = mainPart?
+                .Parts
+                .Where(p => p.OpenXmlPart is CustomXmlPart)
+                .Select(c => (c.OpenXmlPart as CustomXmlPart).CustomXmlPropertiesPart);
+
+            UpdateDocumentPartObjectTypeCode(mainPart, newObjectTypeCode);
+            UpdateDocumentPartObjectTypeCode(headerParts, newObjectTypeCode);
+            UpdateDocumentPartObjectTypeCode(footerParts, newObjectTypeCode);
+            UpdateDocumentPartObjectTypeCode(customXmlPropertyParts, newObjectTypeCode);
+            UpdateXMLPart(document.Package, newObjectTypeCode);
+            document.Save();
+            document.Close();
+
+            FileContents = File.ReadAllBytes(path);
             using (var stream = new MemoryStream(FileContents))
             {
-                var document = WordprocessingDocument.Open(stream, true);
-
-                var mainPart = document.MainDocumentPart;
-
-                var headerParts = mainPart?
-                    .Parts
-                    .Where(p => p.OpenXmlPart is HeaderPart)
-                    .Select(p => p.OpenXmlPart);
-
-                var footerParts = mainPart?
-                    .Parts
-                    .Where(p => p.OpenXmlPart is FooterPart)
-                    .Select(p => p.OpenXmlPart);
-
-                var customXmlPropertyParts = mainPart?
-                    .Parts
-                    .Where(p => p.OpenXmlPart is CustomXmlPart)
-                    .Select(c => (c.OpenXmlPart as CustomXmlPart).CustomXmlPropertiesPart);
-
-                UpdateDocumentPartObjectTypeCode(mainPart, newObjectTypeCode);
-                UpdateDocumentPartObjectTypeCode(headerParts, newObjectTypeCode);
-                UpdateDocumentPartObjectTypeCode(footerParts, newObjectTypeCode);
-                UpdateDocumentPartObjectTypeCode(customXmlPropertyParts, newObjectTypeCode);
-
-                document.Close();
 
                 FileContents = stream.ToArray();
                 ObjectTypeCode = newObjectTypeCode;
+            }
+        }
+
+        private void UpdateXMLPart(System.IO.Packaging.Package package, int entitycode)
+        {
+            var xmlpart = package?
+                .GetParts();
+            foreach (var part in xmlpart)
+            {
+                string text;
+                using (var reading = new StreamReader(part.GetStream()))
+                {
+                    text = reading.ReadToEnd();
+                }
+                text = text.Replace($"{EntityTypeName}/{ObjectTypeCode}/", $"{EntityTypeName}/{entitycode}/");
+
+                using (var writeing = new StreamWriter(part.GetStream()))
+                {
+                    writeing.Write(text);
+                    writeing.Flush();
+                }
             }
         }
 
@@ -159,7 +185,7 @@ namespace CCLLC.Cds.DevOps.PowerShell
             using (var stream = new MemoryStream(FileContents))
             {
                 var document = WordprocessingDocument.Open(stream, false);
-                
+
                 var customXmlPropertyParts = document
                     .MainDocumentPart?
                     .Parts
@@ -169,12 +195,12 @@ namespace CCLLC.Cds.DevOps.PowerShell
                 var dataMappingXml = customXmlPropertyParts?
                     .Where(p => p.RootElement?.InnerXml?.Contains(rootPath) ?? false)
                     .FirstOrDefault()?.RootElement.InnerXml;
-                    
+
                 if (dataMappingXml is null)
                 {
                     return null;
-                }                               
-                
+                }
+
                 using (var textStream = new StringReader(dataMappingXml))
                 {
                     var xDoc = XDocument.Load(textStream);
@@ -189,11 +215,11 @@ namespace CCLLC.Cds.DevOps.PowerShell
                         .Substring(rootPath.Length)
                         .Split('/');
 
-                    return new Tuple<string, int>(entityIdentifiers[0], int.Parse(entityIdentifiers[1]));                   
+                    return new Tuple<string, int>(entityIdentifiers[0], int.Parse(entityIdentifiers[1]));
                 }
             }
         }
-        
+
         private void UpdateDocumentPartObjectTypeCode(IEnumerable<OpenXmlPart> parts, int newObjectTypeCode)
         {
             if (parts is null)
