@@ -162,17 +162,20 @@ namespace CCLLC.Cds.DevOps.PowerShell
                 .GetParts();
             foreach (var part in xmlpart)
             {
-                string text;
-                using (var reading = new StreamReader(part.GetStream()))
+                if (part.ContentType != "image/png")
                 {
-                    text = reading.ReadToEnd();
-                }
-                text = text.Replace($"{EntityTypeName}/{ObjectTypeCode}/", $"{EntityTypeName}/{entitycode}/");
+                    string text;
+                    using (var reading = new StreamReader(part.GetStream()))
+                    {
+                        text = reading.ReadToEnd();
+                    }
+                    text = text.Replace($"{EntityTypeName}/{ObjectTypeCode}/", $"{EntityTypeName}/{entitycode}/");
 
-                using (var writeing = new StreamWriter(part.GetStream()))
-                {
-                    writeing.Write(text);
-                    writeing.Flush();
+                    using (var writeing = new StreamWriter(part.GetStream()))
+                    {
+                        writeing.Write(text);
+                        writeing.Flush();
+                    }
                 }
             }
         }
